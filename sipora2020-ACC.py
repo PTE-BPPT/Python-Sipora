@@ -240,31 +240,38 @@ def parsingACC(payload):
 xDataQueue = Queue()
 yDataQueue = Queue()
 zDataQueue = Queue()
+timestampDataQueue = Queue()
 
 # creating a lock 
 lock = threading.Lock() 
 
 def prosesACC():
     print('ACC\n')
-    serialACC = serial.Serial('COM10', 9600)
+    serialACC = serial.Serial('COM19', 9600)
+    clientthingsboard = TBDeviceMqttClient("202.46.7.33", "TEWSSiporaAccelero")
+    clientthingsboard.max_inflight_messages_set(50)
+    clientthingsboard.connect()
     while True:
         dataInput = serialACC.readline()[:-2]
-        data=dataInput.decode('utf-8')
+        data=dataInput.decode()
         print(data)
         if data:
             dataacc = parsingACC(data)
+            telemetry_with_ts = {"ts": int(round(time.time() * 1000)), "values": {"x": float(dataacc[0]), "y": float(dataacc[1]), "z": float(dataacc[2])}}
+            clientthingsboard.send_telemetry(telemetry_with_ts)                         
+
             lock.acquire()
             xDataQueue.put(dataacc[0])
             yDataQueue.put(dataacc[1])
             zDataQueue.put(dataacc[2])
+            timestampDataQueue.put(int(round(time.time() * 1000)))
             lock.release()
             writelogdataaccelerometer(dataacc)
 
 def prosesIOT():
 
     print('IoT\n')
-    clientthingsboard = TBDeviceMqttClient("202.46.7.33", "TEWSSiporaAccelero")
-    clientthingsboard.connect()
+
     while True:
         if (xDataQueue.empty() == False):
 
@@ -273,17 +280,18 @@ def prosesIOT():
             xdata = xDataQueue.get()
             ydata = yDataQueue.get()
             zdata = zDataQueue.get()
+            timestampData = timestampDataQueue.get()
             lock.release()
 
             #send to RDS
             clientRDS = client()
             payload = str(xdata) + ',' + str(ydata) + ',' + str(zdata)
-            clientRDS.setBrokerParameter("202.46.3.41",1883, userName="tews-siberut", password="tews_2019")
-            clientRDS.publishData(payload, "node/sensor/siberut/accelerometer", sensorType=1, qosValue=1)
+            clientRDS.setBrokerParameter("202.46.3.41",1883, userName="tews-sipora", password="tews_2019")
+            clientRDS.publishData(payload, "node/sensor/sipora/acl", sensorType=1, qosValue=1)
 
             #send to thingsboard
-            telemetry_with_ts = {"ts": int(round(time.time() * 1000)), "values": {"x": float(xdata), "y": float(ydata), "z": float(zdata)}}
-            clientthingsboard.send_telemetry(telemetry_with_ts)                         
+            #telemetry_with_ts = {"ts": int(timestampData), "values": {"x": float(xdata), "y": float(ydata), "z": float(zdata)}}
+            #clientthingsboard.send_telemetry(telemetry_with_ts)                         
 
     clientthingsboard.disconnect()
 

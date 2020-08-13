@@ -19,7 +19,7 @@ import json
 client_name="test sipora"
 
 pressurebuffer = 0
-serialBPR = serial.Serial('COM17', 9600)
+serialBPR = serial.Serial('COM2', 9600)
 
 
 #serialCPU = serial.Serial('COM5', 115200)
@@ -241,6 +241,7 @@ def parsingBPR(payload):
 #creating message queue
 pressureDataQueue = Queue()
 temperatureDataQueue = Queue()
+timestampDataQueue = Queue()
 
 # creating a lock 
 lock = threading.Lock() 
@@ -249,39 +250,44 @@ def prosesBPR():
     print('BPR\n')
     global pressurebuffer
     global serialBPR
+    clientthingsboard = TBDeviceMqttClient("202.46.7.33", "TEWSSiporaBPR")
+    clientthingsboard.max_inflight_messages_set(10)
+    clientthingsboard.connect()
     while True:
         dataInput = serialBPR.readline()[:-2]
-        data=dataInput.decode('utf-8')
+        data=dataInput.decode()
         print(data)
         if data:
             databpr = parsingBPR(data)
+            #send to thingsboard
+            telemetry_with_ts = {"ts": int(round(time.time() * 1000)), "values": {"pressure": float(pressuredata), "temperature": float(temperaturedata)}}
+            clientthingsboard.send_telemetry(telemetry_with_ts)                         
+
             lock.acquire()
             pressureDataQueue.put(databpr[1])
             temperatureDataQueue.put(databpr[2])
+            timestampDataQueue.put(int(round(time.time() * 1000)))
             lock.release()
             pressurebuffer = databpr[1]
             writelogdataBPR(databpr)
             
-
-        
 def prosesCPU():
-    print('akustik\n')
+    print('CPU\n')
     global pressurebuffer
-    serialCPU = serial.Serial('COM18', 9600)
-    while True:
-        dataInput = serialCPU.readline()[:-2]
-        data=dataInput.decode('utf-8')
-        print(data)
-        if data.find("0100"):
-            databuffer = "*0001" + str(pressurebuffer) + "\r\n"
-            serialCPU.write(databuffer.encode())
+    #serialCPU = serial.Serial('COM18', 9600)
+    #while True:
+    #    dataInput = serialCPU.readline()[:-2]
+    #    data=dataInput.decode('utf-8')
+    #    print(data)
+    #    if data.find("0100"):
+    #        databuffer = "*0001" + str(pressurebuffer) + "\r\n"
+    #        serialCPU.write(databuffer.encode())
     
 
 def prosesIOT():
 
     print('IoT\n')
-    clientthingsboard = TBDeviceMqttClient("202.46.7.33", "TEWSSiporaBPR")
-    clientthingsboard.connect()
+
     while True:
         if (pressureDataQueue.empty() == False):
 
@@ -289,17 +295,15 @@ def prosesIOT():
             lock.acquire()
             pressuredata = pressureDataQueue.get()
             temperaturedata = temperatureDataQueue.get()
+            timestampData = timestampDataQueue.get()
             lock.release()
 
             #send to RDS
             clientRDS = client()
             payload = str(pressuredata) + ',' + str(temperaturedata)
-            clientRDS.setBrokerParameter("202.46.3.41",1883, userName="tews-siberut", password="tews_2019")
-            clientRDS.publishData(payload, "node/sensor/siberut/bpr", sensorType=0, qosValue=1)
+            clientRDS.setBrokerParameter("202.46.3.41",1883, userName="tews-sipora", password="tews_2019")
+            clientRDS.publishData(payload, "node/sensor/sipora/bpr", sensorType=0, qosValue=1)
 
-            #send to thingsboard
-            telemetry_with_ts = {"ts": int(round(time.time() * 1000)), "values": {"pressure": float(pressuredata), "temperature": float(temperaturedata)}}
-            clientthingsboard.send_telemetry(telemetry_with_ts)                         
 
     clientthingsboard.disconnect()
 
